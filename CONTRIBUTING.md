@@ -1,35 +1,11 @@
 # Contributing
 
-Thanks for your interest! This is a small, single-file tool and the goal is to keep it that way: simple, dependency-free, and auditable.
+Keep this launcher small and compatible with Windows PowerShell 5.1. Do not read, copy, replace, log or transmit credentials. Do not add remote installation, token switching, or automatic profile deletion.
 
-## Ground rules
-
-- **No new runtime dependencies.** It should stay a plain Windows PowerShell 5.1–compatible script.
-- **Keep it readable.** Someone should be able to read the whole thing before running it.
-- **Don't touch credentials or account data beyond what's needed to launch a window.** The tool only sets data-dir paths and launches the official app; it must never read, copy, or transmit `auth.json`, cookies, or tokens.
-
-## Dev setup
-
-There's no build step. Edit `ChatGPT-Switcher.ps1` and run it.
-
-Syntax check without executing:
+Run the regression suite before committing:
 
 ```powershell
-$e=$null;$t=$null
-[System.Management.Automation.Language.Parser]::ParseFile("ChatGPT-Switcher.ps1",[ref]$t,[ref]$e)
-if($e){$e}else{"OK"}
+.\tests\Regression.ps1
 ```
 
-Please test on a real ChatGPT desktop install before opening a PR, and mention:
-- Windows version and PowerShell version
-- ChatGPT app version (`-Diagnose` prints it)
-
-## Reporting bugs
-
-Open an issue with the output of `ChatGPT-Switcher.cmd -Diagnose` (redact anything you consider private). Launch failures after an app update are the most likely class of bug — the diagnostics show the detected exe path and package name.
-
-## Scope
-
-Good fits: reliability of app detection/launch, UX of the picker, accessibility, localization.
-
-Out of scope: anything that scrapes, automates, or interacts with the ChatGPT service itself; anything that touches server-side accounts; bundling a browser or a full app runtime.
+The suite uses synthetic profile directories and does not launch ChatGPT or access existing session data. For the additional integration checks, see [docs/VALIDATION.md](docs/VALIDATION.md).
