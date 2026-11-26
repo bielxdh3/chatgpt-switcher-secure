@@ -28,6 +28,8 @@ Profile data lives under `E:\ChatGPT-Accounts-Secure`, outside the checkout. The
 
 ## Documentation
 
+If the official Windows app reports "Local Work executor failed to start" because its bundled plugin files cannot be copied, see [Local Work recovery](docs/LOCAL-WORK-RECOVERY.md).
+
 - [Security model](docs/SECURITY.md)
 - [Tests and integration validation](docs/VALIDATION.md)
 - [Contributing](CONTRIBUTING.md)
