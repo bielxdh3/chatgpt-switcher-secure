@@ -5,6 +5,7 @@
 param(
     [Parameter(Mandatory,ParameterSetName='Add')][string]$Add,
     [Parameter(Mandatory,ParameterSetName='Launch')][string]$Launch,
+    [Parameter(Mandatory,ParameterSetName='Status')][string]$Status,
     [Parameter(Mandatory,ParameterSetName='List')][switch]$List,
     [Parameter(Mandatory,ParameterSetName='Diagnose')][switch]$Diagnose,
     [Parameter(Mandatory,ParameterSetName='Version')][switch]$Version
@@ -12,7 +13,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $script:Root = 'E:\ChatGPT-Accounts-Secure'
-$script:AppVersion = '1.3.0-secure.1'
+$script:AppVersion = '1.3.0-secure.2'
 $script:PackageFamily = 'OpenAI.Codex_2p2nqsd0c76g0'
 
 function Get-ProfileId([string]$Id) {
@@ -184,7 +185,7 @@ function Get-ChatGptApp {
 function New-LaunchInfo([string]$Exe,$Profile) {
     $info = New-Object Diagnostics.ProcessStartInfo
     $info.FileName = $Exe
-    $info.WorkingDirectory = $Profile.Base
+    $info.WorkingDirectory = [IO.Path]::GetDirectoryName($Exe)
     $info.UseShellExecute = $false
     $info.Arguments = '--user-data-dir="' + $Profile.Electron + '"'
     # Never modify the parent environment or inherit another provider/session override.
@@ -196,10 +197,53 @@ function New-LaunchInfo([string]$Exe,$Profile) {
     return $info
 }
 
+function Get-WindowsArguments([string]$CommandLine) {
+    if (-not ('SwitcherNative.Arguments' -as [type])) {
+        # Compile only this embedded, auditable interop source, using Windows' own argument parser.
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+namespace SwitcherNative {
+    public static class Arguments {
+        [DllImport("shell32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        private static extern IntPtr CommandLineToArgvW(string commandLine, out int argc);
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr LocalFree(IntPtr memory);
+        public static string[] Parse(string commandLine) {
+            int count;
+            IntPtr ptr = CommandLineToArgvW(commandLine, out count);
+            if (ptr == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+            try {
+                string[] values = new string[count];
+                for (int i = 0; i < count; i++)
+                    values[i] = Marshal.PtrToStringUni(Marshal.ReadIntPtr(ptr, i * IntPtr.Size));
+                return values;
+            } finally { LocalFree(ptr); }
+        }
+    }
+}
+'@
+    }
+    [SwitcherNative.Arguments]::Parse($CommandLine)
+}
+
 function Test-ProfileCommandLine([string]$CommandLine,[string]$Directory) {
     if ([string]::IsNullOrWhiteSpace($CommandLine)) { return $false }
-    $path = [regex]::Escape($Directory)
-    return $CommandLine -match ('(?:\A|\s)(?:--user-data-dir(?:=|\s+)(?:"' + $path + '"|' + $path + ')|"--user-data-dir=' + $path + '")(?=\s|\z)')
+    $argv = @(Get-WindowsArguments $CommandLine)
+    $values = @()
+    for ($i=1; $i -lt $argv.Count; $i++) {
+        $arg = $argv[$i]
+        if ($arg -ceq '--') { break }
+        if ($arg.StartsWith('--user-data-dir=',[StringComparison]::Ordinal)) {
+            $values += $arg.Substring('--user-data-dir='.Length)
+        } elseif ($arg -ceq '--user-data-dir') {
+            if ($i+1 -ge $argv.Count) { return $false }
+            $i++
+            $values += $argv[$i]
+        }
+    }
+    return ($values.Count -eq 1 -and [string]::Equals($values[0],$Directory,[StringComparison]::OrdinalIgnoreCase))
 }
 
 function Test-ProfileRunning($Profile) {
@@ -213,6 +257,23 @@ function Test-ProfileRunning($Profile) {
     return $false
 }
 
+function Wait-ProfileRunning($Profile,$Process,[int]$TimeoutMilliseconds=8000) {
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $seen = $false
+    do {
+        if (Test-ProfileRunning $Profile) {
+            if ($seen) { return }
+            $seen = $true
+        } else {
+            $seen = $false
+            if ($Process.HasExited) { throw 'Application exited before a separate profile process was observed.' }
+        }
+        if ($clock.ElapsedMilliseconds -ge $TimeoutMilliseconds) { break }
+        Start-Sleep -Milliseconds 250
+    } while ($clock.ElapsedMilliseconds -lt $TimeoutMilliseconds)
+    throw 'Could not verify a separate profile process. Inspect the application before retrying.'
+}
+
 function Start-Account([string]$Id) {
     Invoke-WithProfileLock {
         $p = Get-ExistingProfile $Id
@@ -223,7 +284,10 @@ function Start-Account([string]$Id) {
         $null = Get-ExistingProfile $Id
         $proc = [Diagnostics.Process]::Start($info)
         if ($null -eq $proc) { throw 'App launch returned no process.' }
-        try { return "Started profile $($p.Id), PID $($proc.Id)." }
+        try {
+            Wait-ProfileRunning $p $proc
+            return "Profile $($p.Id) process observed; initial PID $($proc.Id). Verify the account inside the app."
+        }
         finally { $proc.Dispose() }
     }
 }
@@ -234,6 +298,13 @@ try {
     switch ($PSCmdlet.ParameterSetName) {
         'Add' { "Profile ready: $(Add-Account $Add)" }
         'Launch' { Start-Account $Launch }
+        'Status' {
+            Invoke-WithProfileLock {
+                $p = Get-ExistingProfile $Status
+                if (Test-ProfileRunning $p) { "Profile $($p.Id): process observed." }
+                else { "Profile $($p.Id): no process observed." }
+            }
+        }
         'List' { Get-ProfileIds }
         'Diagnose' {
             $app = Get-ChatGptApp
@@ -243,7 +314,7 @@ try {
         }
         'Version' { "ChatGPT Switcher Secure $script:AppVersion" }
         default {
-            'Usage: ChatGPT-Switcher.ps1 -Add dot-1 | -Launch dot-1 | -List | -Diagnose | -Version'
+            'Usage: ChatGPT-Switcher.ps1 -Add dot-1 | -Launch dot-1 | -Status dot-1 | -List | -Diagnose | -Version'
             'Sign in separately inside each official ChatGPT window.'
         }
     }

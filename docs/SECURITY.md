@@ -10,9 +10,10 @@ Upstream source: kociden/chatgpt-switcher, commit `497bc5516d1fc0795d9312b30103b
 - A per-Windows-user global mutex serializes profile creation, listing and launch operations. No shared mutable JSON registry.
 - Separate process environment; provider, Electron, Node and TLS key-log overrides are removed from the child environment, and only profile-specific Codex/Electron paths are set. Parent environment is unchanged.
 - Diagnostics report package version, signature status and profile count, not raw process command lines or tokens.
+- Launch uses the verified executable's installation directory as its working directory. Profile arguments are parsed with the Windows native argument parser, rejecting duplicate or embedded profile flags. The launcher waits for repeated observations of a matching process before reporting success; it does not equate a process with an authenticated account.
 
 ## Limitations
 
 Local profile separation is not a security boundary against another process running as the same Windows user, an administrator, SYSTEM or a compromised application. The filesystem checks are not an atomic defense against an adversary who can rename or modify the same directories concurrently. Use independent OS accounts and tighter agent permissions if a genuine trust boundary is required. The installed application, its account store, its updater and its remote service are outside this launcher audit. Direct process launch and profile-directory overrides are not a supported OpenAI API and may change. Do not use this launcher to bypass account, workspace, or service restrictions.
 
-No runtime downloads or third-party binaries are distributed. Use the reviewed checkout and official application only.
+No runtime downloads or third-party binaries are distributed. Use the reviewed checkout and official application only. The small native argument-parser interop is compiled locally from embedded C# source. The application itself may emit diagnostic output to its inherited console; do not publish unredacted application logs. Direct launch can lack MSIX package identity, which may affect package-specific integration and update handling; this is not resolved by a valid executable signature.

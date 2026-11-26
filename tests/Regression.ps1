@@ -133,6 +133,36 @@ try {
         Assert-True (Test-ProfileCommandLine ('ChatGPT.exe --user-data-dir "'+$dir+'"') $dir) 'Separate value missed'
         Assert-True (-not (Test-ProfileCommandLine ('ChatGPT.exe "--user-data-dir='+$dir+'-other"') $dir)) 'Prefix match accepted'
     }
+    Check 'Profile flag embedded in another argument is not a match' {
+        $dir='E:\profile\electron'
+        Assert-True (-not (Test-ProfileCommandLine ('ChatGPT.exe "--description=note --user-data-dir='+$dir+' trailing"') $dir)) 'Embedded fake flag accepted'
+        Assert-True (-not (Test-ProfileCommandLine ('ChatGPT.exe --user-data-dir='+$dir+' --user-data-dir=E:\other') $dir)) 'Conflicting profile flags accepted'
+    }
+    Check 'Launch working directory is not profile controlled' {
+        $p=Get-ExistingProfile 'dot-1'
+        $info=New-LaunchInfo 'C:\Program Files\WindowsApps\Example\app\ChatGPT.exe' $p
+        Assert-True ($info.WorkingDirectory -eq 'C:\Program Files\WindowsApps\Example\app') 'Working directory points to writable profile'
+    }
+    Check 'Launch verification rejects invisible or exited process' {
+        function Test-ProfileRunning { return $false }
+        $p=Get-ExistingProfile 'dot-1'
+        Assert-True ($null -ne (Get-Command Wait-ProfileRunning -ErrorAction SilentlyContinue)) 'Launch verification missing'
+        Assert-Throws { Wait-ProfileRunning $p ([pscustomobject]@{HasExited=$true}) 0 }
+        Assert-Throws { Wait-ProfileRunning $p ([pscustomobject]@{HasExited=$false}) 0 }
+    }
+    Check 'Real benign child receives isolated environment' {
+        $p=Get-ExistingProfile 'dot-1'
+        $info=New-LaunchInfo (Join-Path $PSHOME 'powershell.exe') $p
+        $code='$env:CODEX_HOME; $env:CODEX_ELECTRON_USER_DATA_PATH; if ($env:OPENAI_API_KEY) { exit 7 }'
+        $info.Arguments='-NoProfile -NonInteractive -EncodedCommand '+[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($code))
+        $info.CreateNoWindow=$true; $info.RedirectStandardOutput=$true
+        $proc=[Diagnostics.Process]::Start($info)
+        try {
+            Assert-True ($proc.WaitForExit(15000)) 'Synthetic child timed out'
+            $out=$proc.StandardOutput.ReadToEnd().Trim() -split '\r?\n'
+            Assert-True ($proc.ExitCode -eq 0 -and $out.Count -eq 2 -and $out[0] -eq $p.Codex -and $out[1] -eq $p.Electron) 'Child environment differs'
+        } finally { if (-not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit() }; $proc.Dispose() }
+    }
     Check 'Untrusted package refused before launch' {
         function Get-AppxPackage { [pscustomobject]@{PackageFamilyName='Untrusted';SignatureKind='Store';Status='Ok';Version='1.0';InstallLocation=$script:Root} }
         Assert-Throws { Get-ChatGptApp }

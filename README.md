@@ -18,6 +18,7 @@ From the checkout, in Windows PowerShell:
 .\ChatGPT-Switcher.ps1 -Add dot-2
 .\ChatGPT-Switcher.ps1 -Launch dot-1
 .\ChatGPT-Switcher.ps1 -Launch dot-2
+.\ChatGPT-Switcher.ps1 -Status dot-1
 .\ChatGPT-Switcher.ps1 -List
 ```
 
